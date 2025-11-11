@@ -142,13 +142,13 @@ export default function FeedbackPage() {
                   <MessageSquare className="text-primary-600" size={20} />
                   {projectName}
                   <Badge variant="default" className="ml-auto">
-                    {projectComments.length} comments
+                    {(projectComments as any[])?.length} comments
                   </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {projectComments.map((comment) => (
+                  {(projectComments as any[])?.map((comment) => (
                     <CommentCard key={comment.id} comment={comment} />
                   ))}
                 </div>
