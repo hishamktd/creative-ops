@@ -82,7 +82,7 @@ Edit `.env.local` with your Supabase credentials:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-key
+NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY=your-service-key
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
