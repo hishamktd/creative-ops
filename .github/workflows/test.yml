@@ -1,0 +1,587 @@
+name: Comprehensive Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run comprehensive tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  NODE_VERSION: '18'
+  COVERAGE_THRESHOLD: 80
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run unit tests
+      run: npm run test:run
+    
+    - name: Generate coverage report
+      run: npm run test:coverage
+    
+    - name: Check coverage threshold
+      run: |
+        COVERAGE=$(npm run test:coverage --silent | grep -o 'All files.*[0-9]\+\.[0-9]\+' | grep -o '[0-9]\+\.[0-9]\+' | head -1)
+        echo "Coverage: $COVERAGE%"
+        if (( $(echo "$COVERAGE < $COVERAGE_THRESHOLD" | bc -l) )); then
+          echo "Coverage $COVERAGE% is below threshold $COVERAGE_THRESHOLD%"
+          exit 1
+        fi
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage/lcov.info
+        flags: unit
+        name: unit-tests
+        fail_ci_if_error: true
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Setup test database
+      run: |
+        npm run db:setup:test
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+    
+    - name: Run integration tests
+      run: npm run test:integration
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+        NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
+
+  accessibility-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run accessibility tests
+      run: npm run test:accessibility
+    
+    - name: Upload accessibility report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: accessibility-report
+        path: accessibility-report/
+
+  performance-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run performance tests
+      run: npm run test:performance
+    
+    - name: Upload performance report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-report
+        path: performance-report/
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps
+    
+    - name: Build application
+      run: npm run build
+    
+    - name: Run E2E tests
+      run: npm run test:e2e
+      env:
+        NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+    
+    - name: Upload E2E test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: e2e-report
+        path: |
+          test-results/
+          playwright-report/
+
+  visual-regression:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps
+    
+    - name: Run visual regression tests
+      run: npx playwright test --config=playwright.visual.config.ts
+    
+    - name: Upload visual diff report
+      uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: visual-diff-report
+        path: |
+          test-results/
+          visual-report/
+
+  security-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run security audit
+      run: npm audit --audit-level moderate
+    
+    - name: Run dependency check
+      run: npx audit-ci --moderate
+    
+    - name: Run SAST scan
+      uses: github/super-linter@v4
+      env:
+        DEFAULT_BRANCH: main
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VALIDATE_TYPESCRIPT_ES: true
+        VALIDATE_JAVASCRIPT_ES: true
+
+  comprehensive-tests:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[comprehensive]')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run comprehensive test suite
+      run: |
+        echo "Running comprehensive test suite..."
+        npm run test:all
+        echo "Comprehensive tests completed"
+    
+    - name: Upload comprehensive test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: comprehensive-test-results
+        path: |
+          coverage/
+          test-results/
+          performance-report/
+          accessibility-report/
+          visual-report/
+
+  test-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ['16', '18', '20']
+        exclude:
+          # Exclude some combinations to reduce CI time
+          - os: windows-latest
+            node-version: '16'
+          - os: macos-latest
+            node-version: '16'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run core tests
+      run: npm run test:run
+
+  test-reporting:
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, accessibility-tests, performance-tests, e2e-tests, visual-regression, security-tests, test-quality-gates]
+    if: always()
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Download all test artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: ./test-artifacts
+    
+    - name: Generate Comprehensive Test Report
+      run: |
+        node -e "
+        const fs = require('fs');
+        const path = require('path');
+        
+        const report = {
+          timestamp: new Date().toISOString(),
+          commit: process.env.GITHUB_SHA,
+          branch: process.env.GITHUB_REF_NAME,
+          workflow: process.env.GITHUB_RUN_ID,
+          results: {
+            unit: '${{ needs.unit-tests.result }}',
+            integration: '${{ needs.integration-tests.result }}',
+            accessibility: '${{ needs.accessibility-tests.result }}',
+            performance: '${{ needs.performance-tests.result }}',
+            e2e: '${{ needs.e2e-tests.result }}',
+            visual: '${{ needs.visual-regression.result }}',
+            security: '${{ needs.security-tests.result }}',
+            quality_gates: '${{ needs.test-quality-gates.result }}'
+          },
+          summary: {
+            total: 8,
+            passed: Object.values({
+              unit: '${{ needs.unit-tests.result }}',
+              integration: '${{ needs.integration-tests.result }}',
+              accessibility: '${{ needs.accessibility-tests.result }}',
+              performance: '${{ needs.performance-tests.result }}',
+              e2e: '${{ needs.e2e-tests.result }}',
+              visual: '${{ needs.visual-regression.result }}',
+              security: '${{ needs.security-tests.result }}',
+              quality_gates: '${{ needs.test-quality-gates.result }}'
+            }).filter(r => r === 'success').length,
+            failed: Object.values({
+              unit: '${{ needs.unit-tests.result }}',
+              integration: '${{ needs.integration-tests.result }}',
+              accessibility: '${{ needs.accessibility-tests.result }}',
+              performance: '${{ needs.performance-tests.result }}',
+              e2e: '${{ needs.e2e-tests.result }}',
+              visual: '${{ needs.visual-regression.result }}',
+              security: '${{ needs.security-tests.result }}',
+              quality_gates: '${{ needs.test-quality-gates.result }}'
+            }).filter(r => r === 'failure').length
+          }
+        };
+        
+        fs.writeFileSync('comprehensive-test-report.json', JSON.stringify(report, null, 2));
+        "
+    
+    - name: Create Test Badge
+      run: |
+        PASSED=$(jq '.summary.passed' comprehensive-test-report.json)
+        TOTAL=$(jq '.summary.total' comprehensive-test-report.json)
+        
+        if [ "$PASSED" -eq "$TOTAL" ]; then
+          COLOR="brightgreen"
+          STATUS="$PASSED/$TOTAL passing"
+        else
+          COLOR="red"
+          STATUS="$PASSED/$TOTAL passing"
+        fi
+        
+        curl -s "https://img.shields.io/badge/tests-$STATUS-$COLOR" > test-badge.svg
+    
+    - name: Upload Test Reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: comprehensive-test-report
+        path: |
+          comprehensive-test-report.json
+          test-badge.svg
+    
+    - name: Comment PR with Test Results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('comprehensive-test-report.json', 'utf8'));
+          
+          const statusEmoji = {
+            success: '✅',
+            failure: '❌',
+            cancelled: '⏹️',
+            skipped: '⏭️'
+          };
+          
+          const body = `
+          ## 🧪 Test Results Summary
+          
+          **Overall Status:** ${report.summary.passed === report.summary.total ? '✅ All tests passed!' : '❌ Some tests failed'}
+          
+          | Test Suite | Status | Result |
+          |------------|--------|--------|
+          | Unit Tests | ${statusEmoji[report.results.unit] || '❓'} | ${report.results.unit} |
+          | Integration Tests | ${statusEmoji[report.results.integration] || '❓'} | ${report.results.integration} |
+          | Accessibility Tests | ${statusEmoji[report.results.accessibility] || '❓'} | ${report.results.accessibility} |
+          | Performance Tests | ${statusEmoji[report.results.performance] || '❓'} | ${report.results.performance} |
+          | E2E Tests | ${statusEmoji[report.results.e2e] || '❓'} | ${report.results.e2e} |
+          | Visual Regression | ${statusEmoji[report.results.visual] || '❓'} | ${report.results.visual} |
+          | Security Tests | ${statusEmoji[report.results.security] || '❓'} | ${report.results.security} |
+          | Quality Gates | ${statusEmoji[report.results.quality_gates] || '❓'} | ${report.results.quality_gates} |
+          
+          **Summary:** ${report.summary.passed}/${report.summary.total} test suites passed
+          
+          ---
+          *Generated at ${report.timestamp}*
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+  test-summary:
+    runs-on: ubuntu-latest
+    needs: [test-reporting]
+    if: always()
+    
+    steps:
+    - name: Download Test Report
+      uses: actions/download-artifact@v3
+      with:
+        name: comprehensive-test-report
+        path: ./
+    
+    - name: Test Summary
+      run: |
+        REPORT=$(cat comprehensive-test-report.json)
+        PASSED=$(echo $REPORT | jq '.summary.passed')
+        TOTAL=$(echo $REPORT | jq '.summary.total')
+        
+        echo "## 🧪 Comprehensive Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Test Suites:** $PASSED/$TOTAL passed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "| Test Type | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+        
+        echo $REPORT | jq -r '.results | to_entries[] | "| \(.key | ascii_upcase) | \(.value) |"' >> $GITHUB_STEP_SUMMARY
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "$PASSED" -eq "$TOTAL" ]; then
+          echo "## ✅ All Test Suites Passed!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 Congratulations! All test suites are passing." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## ❌ Some Test Suites Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Please review the failed test suites and fix any issues." >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+
+  test-quality-gates:
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, performance-tests]
+    if: always()
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Download test artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: ./test-artifacts
+    
+    - name: Quality Gate Analysis
+      run: |
+        echo "## Quality Gate Analysis" >> $GITHUB_STEP_SUMMARY
+        
+        # Check test coverage
+        if [ -f "./coverage/lcov.info" ]; then
+          COVERAGE_LINES=$(grep -o 'LF:[0-9]*' ./coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}')
+          COVERAGE_HIT=$(grep -o 'LH:[0-9]*' ./coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}')
+          COVERAGE_PERCENT=$(echo "scale=2; $COVERAGE_HIT * 100 / $COVERAGE_LINES" | bc -l)
+          echo "- Test Coverage: $COVERAGE_PERCENT% ($COVERAGE_HIT/$COVERAGE_LINES lines)" >> $GITHUB_STEP_SUMMARY
+          
+          if (( $(echo "$COVERAGE_PERCENT < $COVERAGE_THRESHOLD" | bc -l) )); then
+            echo "❌ Coverage $COVERAGE_PERCENT% is below threshold $COVERAGE_THRESHOLD%" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ Coverage meets threshold" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        # Check performance benchmarks
+        if [ -f "./test-results/performance-results.json" ]; then
+          PERF_FAILURES=$(jq '.failures | length' ./test-results/performance-results.json)
+          PERF_TOTAL=$(jq '.total' ./test-results/performance-results.json)
+          echo "- Performance Tests: $((PERF_TOTAL - PERF_FAILURES))/$PERF_TOTAL passed" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$PERF_FAILURES" -gt 0 ]; then
+            echo "⚠️ $PERF_FAILURES performance tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        # Check accessibility compliance
+        if [ -f "./test-results/accessibility-results.json" ]; then
+          A11Y_VIOLATIONS=$(jq '.violations | length' ./test-results/accessibility-results.json)
+          echo "- Accessibility Violations: $A11Y_VIOLATIONS" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$A11Y_VIOLATIONS" -gt 0 ]; then
+            echo "❌ $A11Y_VIOLATIONS accessibility violations found" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ No accessibility violations" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        # Check bundle size
+        if [ -f "./.next/analyze/bundle-analyzer-report.json" ]; then
+          BUNDLE_SIZE=$(jq '.assets[0].size' ./.next/analyze/bundle-analyzer-report.json)
+          MAX_BUNDLE_SIZE=5242880  # 5MB
+          echo "- Bundle Size: $(($BUNDLE_SIZE / 1024))KB" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$BUNDLE_SIZE" -gt "$MAX_BUNDLE_SIZE" ]; then
+            echo "⚠️ Bundle size exceeds 5MB limit" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+    
+    - name: Generate Quality Report
+      run: |
+        cat > quality-report.json << EOF
+        {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "coverage": {
+            "threshold": $COVERAGE_THRESHOLD,
+            "actual": $(grep -o 'LH:[0-9]*' ./coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}' || echo 0),
+            "total": $(grep -o 'LF:[0-9]*' ./coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}' || echo 1)
+          },
+          "tests": {
+            "unit": "$([ -f ./test-results/unit-results.json ] && jq '.numPassedTests' ./test-results/unit-results.json || echo 0)",
+            "integration": "$([ -f ./test-results/integration-results.json ] && jq '.numPassedTests' ./test-results/integration-results.json || echo 0)",
+            "e2e": "$([ -f ./test-results/e2e-results.json ] && jq '.stats.passes' ./test-results/e2e-results.json || echo 0)"
+          },
+          "quality_gates": {
+            "coverage_passed": $([ $(echo "scale=2; $(grep -o 'LH:[0-9]*' ./coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}' || echo 0) * 100 / $(grep -o 'LF:[0-9]*' ./coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}' || echo 1)" | bc -l | cut -d. -f1) -ge $COVERAGE_THRESHOLD ] && echo true || echo false),
+            "accessibility_passed": $([ ! -f ./test-results/accessibility-results.json ] || [ $(jq '.violations | length' ./test-results/accessibility-results.json) -eq 0 ] && echo true || echo false),
+            "performance_passed": $([ ! -f ./test-results/performance-results.json ] || [ $(jq '.failures | length' ./test-results/performance-results.json) -eq 0 ] && echo true || echo false)
+          }
+        }
+        EOF
+    
+    - name: Upload Quality Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: quality-report
+        path: quality-report.json
