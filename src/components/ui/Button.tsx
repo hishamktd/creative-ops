@@ -1,19 +1,21 @@
-import { ReactNode, ButtonHTMLAttributes } from 'react'
+import React, { ReactNode, ButtonHTMLAttributes, forwardRef } from 'react'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
   size?: 'sm' | 'md' | 'lg'
   className?: string
+  asChild?: boolean
 }
 
-export function Button({
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
   children,
   variant = 'primary',
   size = 'md',
   className = '',
+  asChild = false,
   ...props
-}: ButtonProps) {
+}, ref) => {
   const baseStyles = 'font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2'
 
   const variants = {
@@ -30,12 +32,28 @@ export function Button({
     lg: 'px-6 py-3 text-base',
   }
 
+  const classes = `${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`
+
+  if (asChild) {
+    // When asChild is true, we expect children to be a single React element
+    // that we'll clone and add our classes to
+    const child = children as React.ReactElement
+    return React.cloneElement(child, {
+      className: `${child.props.className || ''} ${classes}`.trim(),
+      ref,
+      ...props,
+    })
+  }
+
   return (
     <button
-      className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
+      ref={ref}
+      className={classes}
       {...props}
     >
       {children}
     </button>
   )
-}
+})
+
+Button.displayName = 'Button'

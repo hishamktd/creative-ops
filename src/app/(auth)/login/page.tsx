@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/hooks/useAuth'
 
 export default function LoginPage() {
   const router = useRouter()
-  const { signIn } = useAuth()
+  const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -18,10 +18,10 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
 
-    const { error } = await signIn(email, password)
+    const result = await login(email, password)
 
-    if (error) {
-      setError(error.message)
+    if (result.error) {
+      setError(result.error)
       setLoading(false)
     } else {
       router.push('/dashboard')

@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/hooks/useAuth'
 
 export default function SignupPage() {
   const router = useRouter()
-  const { signUp } = useAuth()
+  const { signup } = useAuth()
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,16 +21,23 @@ export default function SignupPage() {
     setError('')
     setLoading(true)
 
-    const { error } = await signUp(email, password, fullName, role)
+    const result = await signup({
+      email,
+      password,
+      fullName,
+      role
+    })
 
-    if (error) {
-      setError(error.message)
+    if (result.error) {
+      setError(result.error)
       setLoading(false)
     } else {
       setSuccess(true)
-      setTimeout(() => {
-        router.push('/dashboard')
-      }, 2000)
+      if (!result.needsVerification) {
+        setTimeout(() => {
+          router.push('/dashboard')
+        }, 2000)
+      }
     }
   }
 

@@ -1,32 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { AnalyticsService } from '../analyticsService'
 
 // Mock Supabase client
-const mockSupabase = {
-  rpc: vi.fn(),
-  from: vi.fn(() => ({
-    select: vi.fn(() => ({
-      eq: vi.fn(() => ({
-        gte: vi.fn(() => ({
-          order: vi.fn(() => ({
-            limit: vi.fn(() => ({
-              single: vi.fn()
+vi.mock('@/lib/supabase/client', () => ({
+  createClient: () => ({
+    rpc: vi.fn(),
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          gte: vi.fn(() => ({
+            order: vi.fn(() => ({
+              limit: vi.fn(() => ({
+                single: vi.fn()
+              }))
             }))
           }))
         }))
       }))
     }))
-  }))
-}
-
-vi.mock('@/lib/supabase/client', () => ({
-  createClient: () => mockSupabase
+  })
 }))
+
+import { AnalyticsService } from '../analyticsService'
 
 describe('AnalyticsService', () => {
   let analyticsService: AnalyticsService
+  let mockSupabase: any
 
   beforeEach(() => {
+    // Get the mocked supabase instance
+    const { createClient } = require('@/lib/supabase/client')
+    mockSupabase = createClient()
     analyticsService = new AnalyticsService()
     vi.clearAllMocks()
   })

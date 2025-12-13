@@ -1,92 +1,110 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
-import { User } from '@/types'
-import { User as SupabaseUser } from '@supabase/supabase-js'
+import { useSession, signIn, signOut } from 'next-auth/react'
+import { useState } from 'react'
+
+interface SignupData {
+  email: string
+  password: string
+  fullName: string
+  role?: string
+}
 
 export function useAuth() {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null)
+  const { data: session, status } = useSession()
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setAuthUser(session?.user ?? null)
-      if (session?.user) {
-        fetchUserProfile(session.user.id)
-      } else {
-        setLoading(false)
-      }
-    })
-
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUser(session?.user ?? null)
-      if (session?.user) {
-        fetchUserProfile(session.user.id)
-      } else {
-        setUser(null)
-        setLoading(false)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const fetchUserProfile = async (userId: string) => {
+  const login = async (email: string, password: string) => {
+    setLoading(true)
+    setError(null)
+    
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single()
+      const result = await signIn('credentials', {
+        email,
+        password,
+        redirect: false,
+      })
 
-      if (error) throw error
-      setUser(data)
-    } catch (error) {
-      console.error('Error fetching user profile:', error)
+      if (result?.error) {
+        setError('Invalid credentials')
+        setLoading(false)
+        return { success: false, error: 'Invalid credentials' }
+      }
+
+      setLoading(false)
+      return { success: true, error: null }
+    } catch (err) {
+      const errorMessage = 'Login failed'
+      setError(errorMessage)
+      setLoading(false)
+      return { success: false, error: errorMessage }
+    }
+  }
+
+  const signup = async (data: SignupData) => {
+    setLoading(true)
+    setError(null)
+    
+    try {
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        setError(result.error || 'Signup failed')
+        setLoading(false)
+        return { success: false, error: result.error || 'Signup failed' }
+      }
+
+      // Auto-login after successful signup if email verification is disabled
+      if (process.env.NEXT_PUBLIC_SKIP_EMAIL_VERIFICATION === 'true') {
+        const loginResult = await login(data.email, data.password)
+        return loginResult
+      }
+
+      setLoading(false)
+      return { 
+        success: true, 
+        error: null,
+        needsVerification: process.env.NEXT_PUBLIC_SKIP_EMAIL_VERIFICATION !== 'true'
+      }
+    } catch (err) {
+      const errorMessage = 'Signup failed'
+      setError(errorMessage)
+      setLoading(false)
+      return { success: false, error: errorMessage }
+    }
+  }
+
+  const logout = async () => {
+    setLoading(true)
+    try {
+      await signOut({ redirect: false })
+    } catch (err) {
+      console.error('Logout error:', err)
     } finally {
       setLoading(false)
     }
   }
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-    return { error }
-  }
-
-  const signUp = async (email: string, password: string, fullName: string, role: string = 'team_member') => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-          role: role,
-        },
-      },
-    })
-    return { error }
-  }
-
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut()
-    return { error }
-  }
+  const clearError = () => setError(null)
 
   return {
-    user,
-    authUser,
-    loading,
-    signIn,
-    signUp,
-    signOut,
+    user: session?.user || null,
+    loading: status === 'loading' || loading,
+    error,
+    login,
+    signup,
+    logout,
+    clearError,
+    isAuthenticated: !!session?.user,
+    authDisabled: process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true'
   }
 }

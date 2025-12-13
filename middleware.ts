@@ -1,36 +1,59 @@
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
+import { withAuth } from 'next-auth/middleware'
 import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
 
-export async function middleware(req: NextRequest) {
-  const res = NextResponse.next()
-  const supabase = createMiddlewareClient({ req, res })
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  // Protect dashboard routes
-  if (req.nextUrl.pathname.startsWith('/dashboard') ||
-      req.nextUrl.pathname.startsWith('/projects') ||
-      req.nextUrl.pathname.startsWith('/tasks') ||
-      req.nextUrl.pathname.startsWith('/assets') ||
-      req.nextUrl.pathname.startsWith('/feedback') ||
-      req.nextUrl.pathname.startsWith('/team') ||
-      req.nextUrl.pathname.startsWith('/invoices') ||
-      req.nextUrl.pathname.startsWith('/settings')) {
-    if (!session) {
-      return NextResponse.redirect(new URL('/login', req.url))
+export default withAuth(
+  function middleware(req) {
+    // Check if authentication is disabled
+    if (process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true') {
+      return NextResponse.next()
     }
-  }
 
-  // Redirect authenticated users from auth pages
-  if ((req.nextUrl.pathname === '/login' || req.nextUrl.pathname === '/signup') && session) {
-    return NextResponse.redirect(new URL('/dashboard', req.url))
-  }
+    // If we reach here, NextAuth has already verified the token
+    return NextResponse.next()
+  },
+  {
+    callbacks: {
+      authorized: ({ token, req }) => {
+        // If auth is disabled, allow all requests
+        if (process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true') {
+          return true
+        }
 
-  return res
-}
+        // Check if route requires authentication
+        const protectedRoutes = [
+          '/dashboard',
+          '/projects',
+          '/tasks',
+          '/assets',
+          '/feedback',
+          '/team',
+          '/invoices',
+          '/settings'
+        ]
+
+        const isProtectedRoute = protectedRoutes.some(route => 
+          req.nextUrl.pathname.startsWith(route)
+        )
+
+        // If it's a protected route, require authentication
+        if (isProtectedRoute) {
+          return !!token
+        }
+
+        // For auth pages, redirect if already authenticated
+        if ((req.nextUrl.pathname === '/login' || req.nextUrl.pathname === '/signup') && token) {
+          return false // This will trigger a redirect
+        }
+
+        // Allow all other routes
+        return true
+      },
+    },
+    pages: {
+      signIn: '/login',
+    },
+  }
+)
 
 export const config = {
   matcher: [
